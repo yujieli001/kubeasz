@@ -2,7 +2,8 @@
   when: 'ansible_distribution_file_variety in ["Debian"]'
 
 - import_tasks: redhat.yml
-  when: 'ansible_distribution_file_variety in ["RedHat"]'
+  # when: 'ansible_distribution_file_variety in ["RedHat"]'
+  when: ansible_distribution_file_variety in ["RedHat"] or ansible_distribution in ["CentOS"]
 
 - import_tasks: suse.yml
   when: 'ansible_distribution_file_variety in ["SUSE"]'
@@ -41,6 +42,13 @@
     state: present
     regexp: 'easzlab.io.local'
     line: "{{ ansible_env.SSH_CLIENT.split(' ')[0] }}    easzlab.io.local"
+
+# 设置节点hostname，calico 网络组件要求每个节点不一样的hostname
+- name: 设置节点 hostname
+  hostname:
+    name: "{{ K8S_NODENAME }}"
+    use: systemd
+  when: "ENABLE_SETTING_HOSTNAME|bool"
 
 # 设置节点名称{{ K8S_NODENAME }} /etc/hosts 解析
 # 1.先确保第一个主节点做好解析

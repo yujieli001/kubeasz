@@ -1,52 +1,54 @@
 #!/bin/bash
 #--------------------------------------------------
-# This script is used for: 
+# This script is used for:
 # 1. to download the scripts/binaries/images needed for installing a k8s cluster with kubeasz
 # 2. to run kubeasz in a container (recommended)
 # @author:   gjmzj
 # @usage:    ./ezdown
 # @repo:     https://github.com/easzlab/kubeasz
 #--------------------------------------------------
+# shellcheck disable=SC2155
 set -o nounset
 set -o errexit
 set -o pipefail
 #set -o xtrace
 
 # default settings, can be overridden by cmd line options, see usage
-DOCKER_VER=25.0.3
-KUBEASZ_VER=3.6.3
-K8S_BIN_VER=v1.29.2
+DOCKER_VER=27.3.1
+KUBEASZ_VER=3.6.5
+K8S_BIN_VER=v1.31.2
 # https://github.com/easzlab/dockerfile-kubeasz-ext-bin
-EXT_BIN_VER=1.10.0
+EXT_BIN_VER=1.11.1
 # https://github.com/easzlab/dockerfile-kubeasz-sys-pkg
-SYS_PKG_VER=1.0.0
-HARBOR_VER=v2.8.4
+SYS_PKG_VER=1.0.2
+HARBOR_VER=v2.11.1
 REGISTRY_MIRROR=CN
 
 # images downloaded by default(with 'ezdown -D')
 # https://github.com/projectcalico/calico
-calicoVer=v3.26.4
+calicoVer=v3.28.2
 # https://github.com/coredns/coredns
-corednsVer=1.11.1
+corednsVer=1.11.3
 # https://kubernetes.io/docs/tasks/administer-cluster/nodelocaldns/
-dnsNodeCacheVer=1.22.23
+dnsNodeCacheVer=1.23.1
 dashboardVer=v2.7.0
 dashboardMetricsScraperVer=v1.0.8
 # https://github.com/kubernetes-sigs/metrics-server
-metricsVer=v0.6.4
-pauseVer=3.9
+metricsVer=v0.7.2
+pauseVer=3.10
 
 # images not downloaded by default(only download  with 'ezdown -X ***')
 # https://github.com/cilium/cilium
-ciliumVer=1.14.5
+# https://docs.cilium.io/en/stable/installation/k8s-install-helm/
+ciliumVer=1.16.3
 # https://github.com/flannel-io/flannel
-flannelVer=v0.22.2
+flannelVer=v0.26.0
 # https://github.com/cloudnativelabs/kube-router
 kubeRouterVer=v1.5.4
 # https://github.com/kubeovn/kube-ovn
 kubeOvnVer=v1.11.5
 # https://github.com/rancher/local-path-provisioner
-localpathProvisionerVer=v0.0.24
+localpathProvisionerVer=v0.0.26
 # https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner
 nfsProvisionerVer=v4.0.2
 #https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack
@@ -92,6 +94,7 @@ available OSes:
     ubuntu_18         to download package of Ubuntu 18.04
     ubuntu_20         to download package of Ubuntu 20.04
     ubuntu_22         to download package of Ubuntu 22.04
+    ubuntu_24         to download package of Ubuntu 24.04
 examples:
     ./ezdown -P ubuntu_22
 EOF
@@ -109,7 +112,7 @@ available options:
     local-path-provisioner   to download images of local-path-provisioner
     network-check            to download images of network-check
     nfs-provisioner          to download images of nfs-provisioner
-    prometheus               to download images of prometheus 
+    prometheus               to download images of prometheus
 examples:
     ./ezdown -X prometheus
 EOF
@@ -117,21 +120,22 @@ EOF
 
 function logger() {
   TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S')
+  local FNAME=$(basename "${BASH_SOURCE[1]}")
+  local SOURCE="\033[36m[$FNAME:${BASH_LINENO[0]}]\033[0m"
   case "$1" in
     debug)
-      echo -e "$TIMESTAMP \033[36mDEBUG\033[0m $2"
+      echo -e "\033[36m$TIMESTAMP\033[0m $SOURCE \033[36mDEBUG $2\033[0m"
       ;;
     info)
-      echo -e "$TIMESTAMP \033[32mINFO\033[0m $2"
+      echo -e "\033[36m$TIMESTAMP\033[0m $SOURCE \033[32mINFO $2\033[0m"
       ;;
     warn)
-      echo -e "$TIMESTAMP \033[33mWARN\033[0m $2"
+      echo -e "\033[36m$TIMESTAMP\033[0m $SOURCE \033[33mWARN $2\033[0m"
       ;;
     error)
-      echo -e "$TIMESTAMP \033[31mERROR\033[0m $2"
+      echo -e "\033[36m$TIMESTAMP\033[0m $SOURCE \033[31mERROR $2\033[0m"
       ;;
-    *)
-      ;;
+    *) ;;
   esac
 }
 
@@ -158,13 +162,13 @@ function download_docker() {
   mkdir -p "$BASE/bin/docker-bin" && \
   cp -f "$BASE"/down/docker/* "$BASE/bin/docker-bin" && \
   mv -f "$BASE"/down/docker/* /opt/kube/bin && \
-  ln -sf /opt/kube/bin/docker /bin/docker 
+  ln -sf /opt/kube/bin/docker /bin/docker
 }
 
 function install_docker() {
   # check if a container runtime is already installed
   systemctl status docker|grep Active|grep -q running && { logger warn "docker is already running."; return 0; }
- 
+
   logger debug "generate docker service file"
   cat > /etc/systemd/system/docker.service << EOF
 [Unit]
@@ -274,7 +278,7 @@ function get_kubeasz() {
 
 function get_k8s_bin() {
   [[ -f "$BASE/bin/kubelet" ]] && { logger warn "kubernetes binaries existed"; return 0; }
-  
+
   logger info "downloading kubernetes: $K8S_BIN_VER binaries"
   rm -rf "$BASE/k8s_bin_tmp"
   docker ps -a |grep -q temp_k8s_bin && { logger debug "remove existing container"; docker rm -f temp_k8s_bin; }
@@ -366,7 +370,7 @@ function get_default_images() {
   # dns-node-cache
   if [[ ! -f "$imageDir/k8s-dns-node-cache_$dnsNodeCacheVer.tar" ]];then
     docker pull "easzlab/k8s-dns-node-cache:$dnsNodeCacheVer" && \
-    docker save -o "$imageDir/k8s-dns-node-cache_$dnsNodeCacheVer.tar" "easzlab/k8s-dns-node-cache:$dnsNodeCacheVer" 
+    docker save -o "$imageDir/k8s-dns-node-cache_$dnsNodeCacheVer.tar" "easzlab/k8s-dns-node-cache:$dnsNodeCacheVer"
   else
     docker load -i "$imageDir/k8s-dns-node-cache_$dnsNodeCacheVer.tar"
   fi
@@ -424,13 +428,13 @@ function get_extra_images() {
         docker pull "cilium/cilium:v$ciliumVer" && \
         docker pull "cilium/operator-generic:v$ciliumVer" && \
         docker pull "cilium/hubble-relay:v$ciliumVer" && \
-        docker pull cilium/hubble-ui-backend:v0.12.1 && \
-        docker pull cilium/hubble-ui:v0.12.1 && \
+        docker pull cilium/hubble-ui-backend:v0.13.1 && \
+        docker pull cilium/hubble-ui:v0.13.1 && \
         docker save -o "$imageDir/cilium_$ciliumVer.tar" "cilium/cilium:v$ciliumVer" \
-    		"cilium/operator-generic:v$ciliumVer" \
-    		"cilium/hubble-relay:v$ciliumVer" \
-    		cilium/hubble-ui-backend:v0.12.1 \
-    		cilium/hubble-ui:v0.12.1
+            "cilium/operator-generic:v$ciliumVer" \
+            "cilium/hubble-relay:v$ciliumVer" \
+            "cilium/hubble-ui-backend:v0.13.1" \
+            "cilium/hubble-ui:v0.13.1"
       else
         docker load -i "$imageDir/cilium_$ciliumVer.tar"
       fi
@@ -440,25 +444,25 @@ function get_extra_images() {
       docker push "easzlab.io.local:5000/cilium/operator-generic:v$ciliumVer"
       docker tag "cilium/hubble-relay:v$ciliumVer" "easzlab.io.local:5000/cilium/hubble-relay:v$ciliumVer"
       docker push "easzlab.io.local:5000/cilium/hubble-relay:v$ciliumVer"
-      docker tag cilium/hubble-ui-backend:v0.12.1 easzlab.io.local:5000/cilium/hubble-ui-backend:v0.12.1
-      docker push easzlab.io.local:5000/cilium/hubble-ui-backend:v0.12.1
-      docker tag cilium/hubble-ui:v0.12.1 easzlab.io.local:5000/cilium/hubble-ui:v0.12.1
-      docker push easzlab.io.local:5000/cilium/hubble-ui:v0.12.1
+      docker tag cilium/hubble-ui-backend:v0.13.1 easzlab.io.local:5000/cilium/hubble-ui-backend:v0.13.1
+      docker push easzlab.io.local:5000/cilium/hubble-ui-backend:v0.13.1
+      docker tag cilium/hubble-ui:v0.13.1 easzlab.io.local:5000/cilium/hubble-ui:v0.13.1
+      docker push easzlab.io.local:5000/cilium/hubble-ui:v0.13.1
       ;;
 
     # flannel image
     flannel)
       if [[ ! -f "$imageDir/flannel_$flannelVer.tar" ]];then
         docker pull "flannel/flannel:$flannelVer" && \
-        docker pull "flannel/flannel-cni-plugin:v1.2.0" && \
-        docker save -o "$imageDir/flannel_$flannelVer.tar" "flannel/flannel:$flannelVer" "flannel/flannel-cni-plugin:v1.2.0"
+        docker pull "flannel/flannel-cni-plugin:v1.5.1-flannel2" && \
+        docker save -o "$imageDir/flannel_$flannelVer.tar" "flannel/flannel:$flannelVer" "flannel/flannel-cni-plugin:v1.5.1-flannel2"
       else
         docker load -i "$imageDir/flannel_$flannelVer.tar"
       fi
       docker tag "flannel/flannel:$flannelVer" "easzlab.io.local:5000/flannel/flannel:$flannelVer"
       docker push "easzlab.io.local:5000/flannel/flannel:$flannelVer"
-      docker tag "flannel/flannel-cni-plugin:v1.2.0" "easzlab.io.local:5000/flannel/flannel-cni-plugin:v1.2.0"
-      docker push "easzlab.io.local:5000/flannel/flannel-cni-plugin:v1.2.0"
+      docker tag "flannel/flannel-cni-plugin:v1.5.1-flannel2" "easzlab.io.local:5000/flannel/flannel-cni-plugin:v1.5.1-flannel2"
+      docker push "easzlab.io.local:5000/flannel/flannel-cni-plugin:v1.5.1-flannel2"
       ;;
 
     # kubeapps images
@@ -691,8 +695,8 @@ function start_kubeasz_docker() {
 
 function clean_container() {
  logger info "clean all running containers"
- docker ps -a|awk 'NR>1{print $1}'|xargs docker rm -f 
-} 
+ docker ps -a|awk 'NR>1{print $1}'|xargs docker rm -f
+}
 
 
 ### Main Lines ##################################################
@@ -701,15 +705,15 @@ function main() {
   imageDir="$BASE/down"
 
   # check if use bash shell
-  readlink /proc/$$/exe|grep -q "bash" || { logger error "you should use bash shell, not sh"; exit 1; }
+  # readlink /proc/$$/exe|grep -q "bash" || { logger error "you should use bash shell, not sh"; exit 1; }
   # check if use with root
-  [[ "$EUID" -ne 0 ]] && { logger error "you should run this script as root"; exit 1; }
+  # [[ "$EUID" -ne 0 ]] && { logger error "you should run this script as root"; exit 1; }
 
   # get architecture
   ARCH=$(uname -m)
 
   [[ "$#" -eq 0 ]] && { usage >&2; exit 1; }
-  
+
   ACTION=""
   while getopts "CDP:RSX:d:e:k:m:z:" OPTION; do
       case "$OPTION" in
@@ -755,10 +759,10 @@ function main() {
           ;;
       esac
   done
-  
+
   [[ "$ACTION" == "" ]] && { logger error "illegal option"; usage; exit 1; }
-  
-  # excute cmd "$ACTION" 
+
+  # excute cmd "$ACTION"
   logger info "Action begin: $ACTION"
   ${ACTION} || { logger error "Action failed: $ACTION"; return 1; }
   logger info "Action successed: $ACTION"
